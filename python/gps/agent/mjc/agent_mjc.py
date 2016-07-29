@@ -62,6 +62,7 @@ class AgentMuJoCo(Agent):
         for i in range(self._hyperparams['conditions']):
             for j in range(len(self._hyperparams['pos_body_idx'][i])):
                 idx = self._hyperparams['pos_body_idx'][i][j]
+                # TODO: this should actually add [i][j], but that would break things
                 self._model[i]['body_pos'][idx, :] += \
                         self._hyperparams['pos_body_offset'][i]
             self._world[i].set_model(self._model[i])
@@ -71,6 +72,7 @@ class AgentMuJoCo(Agent):
             self._world[i].set_data(data)
             self._world[i].kinematics()
 
+        # TODO: Seems like using multiple files wouldn't work with this
         self._joint_idx = list(range(self._model[0]['nq']))
         self._vel_idx = [i + self._model[0]['nq'] for i in self._joint_idx]
 
@@ -80,6 +82,8 @@ class AgentMuJoCo(Agent):
         for i in range(self._hyperparams['conditions']):
             if END_EFFECTOR_POINTS in self.x_data_types:
                 self.eepts0.append(self._world[i].get_data()['site_xpos'].flatten())
+                # TODO: this assumes END_EFFECTOR_VELOCITIES is also in datapoints right?
+                # Can we just use self.pack_data here?
                 self.x0.append(
                     np.concatenate([self._hyperparams['x0'][i], self.eepts0[i], np.zeros_like(self.eepts0[i])])
                 )
@@ -135,6 +139,7 @@ class AgentMuJoCo(Agent):
                 for _ in range(self._hyperparams['substeps']):
                     mj_X, _ = self._world[condition].step(mj_X, mj_U)
                 #TODO: Some hidden state stuff will go here.
+                #TODO: Will it? This TODO has been here for awhile
                 self._data = self._world[condition].get_data()
                 self._set_sample(new_sample, mj_X, t, condition)
         new_sample.set(ACTION, U)
@@ -155,6 +160,7 @@ class AgentMuJoCo(Agent):
                    self._hyperparams['x0'][condition][self._vel_idx], t=0)
         self._data = self._world[condition].get_data()
         eepts = self.eepts0[condition]
+        # TODO: can't we just get this out of _data?
         sample.set(END_EFFECTOR_POINTS, eepts, t=0)
         sample.set(END_EFFECTOR_POINT_VELOCITIES, np.zeros_like(eepts), t=0)
         jac = np.zeros([eepts.shape[0], self._model[condition]['nq']])

@@ -46,7 +46,6 @@ class AlgorithmBADMM(Algorithm):
 
         self._set_interp_values()
         self._update_dynamics()  # Update dynamics model using all sample.
-        self._update_policy_samples()  # Choose samples to use with the policy.
         self._update_step_size()  # KL Divergence step size.
 
         for m in range(self.M):
@@ -95,21 +94,6 @@ class AlgorithmBADMM(Algorithm):
             self._hyperparams['lg_step'] = np.exp(
                 np.interp(t, np.linspace(0, 1, num=len(sch)), np.log(sch))
             )
-
-    def _update_policy_samples(self):
-        """ Update the list of samples to use with the policy. """
-        #TODO: Handle synthetic samples.
-        max_policy_samples = self._hyperparams['max_policy_samples']
-        if self._hyperparams['policy_sample_mode'] == 'add':
-            for m in range(self.M):
-                samples = self.cur[m].pol_info.policy_samples
-                samples.extend(self.cur[m].sample_list)
-                if len(samples) > max_policy_samples:
-                    start = len(samples) - max_policy_samples
-                    self.cur[m].pol_info.policy_samples = samples[start:]
-        else:
-            for m in range(self.M):
-                self.cur[m].pol_info.policy_samples = self.cur[m].sample_list
 
     def _update_step_size(self):
         """ Evaluate costs on samples, and adjust the step size. """
@@ -174,17 +158,17 @@ class AlgorithmBADMM(Algorithm):
         X = samples.get_X()
         pol_mu, pol_sig = self.policy_opt.prob(samples.get_obs().copy())[:2]
         pol_info.pol_mu, pol_info.pol_sig = pol_mu, pol_sig
+
         # Update policy prior.
+        policy_prior = pol_info.policy_prior
         if init:
-            self.cur[m].pol_info.policy_prior.update(
-                samples, self.policy_opt,
-                SampleList(self.cur[m].pol_info.policy_samples)
-            )
+            samples = SampleList(self.cur[m].sample_list)
+            mode = self._hyperparams['policy_sample_mode']
         else:
-            self.cur[m].pol_info.policy_prior.update(
-                SampleList([]), self.policy_opt,
-                SampleList(self.cur[m].pol_info.policy_samples)
-            )
+            samples = SampleList([])
+            mode = 'add' # Don't replace with empty samples
+        policy_prior.update(samples, self.policy_opt, mode)
+
         # Collapse policy covariances. This is not really correct, but
         # it works fine so long as the policy covariance doesn't depend
         # on state.
@@ -197,7 +181,7 @@ class AlgorithmBADMM(Algorithm):
             Ps = pol_mu[:, t, :]
             Ys = np.concatenate((Ts, Ps), axis=1)
             # Obtain Normal-inverse-Wishart prior.
-            mu0, Phi, mm, n0 = self.cur[m].pol_info.policy_prior.eval(Ts, Ps)
+            mu0, Phi, mm, n0 = policy_prior.eval(Ts, Ps)
             sig_reg = np.zeros((dX+dU, dX+dU))
             # On the first time step, always slightly regularize covariance.
             if t == 0:

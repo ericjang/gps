@@ -39,48 +39,50 @@ class PolicyPriorGMM(object):
         self.X = None
         self.obs = None
         self.gmm = GMM()
+        # TODO: handle these params better (e.g. should depend on N?)
         self._min_samp = self._hyperparams['min_samples_per_cluster']
         self._max_samples = self._hyperparams['max_samples']
         self._max_clusters = self._hyperparams['max_clusters']
         self._strength = self._hyperparams['strength']
 
-    def update(self, samples, policy_opt, all_samples, retrain=True):
-        """ Update prior with additional data. """
+    def update(self, samples, policy_opt, mode='add'):
+        """
+        Update GMM using new samples or policy_opt.
+        By default does not replace old samples.
+
+        Args:
+            samples: SampleList containing new samples
+            policy_opt: PolicyOpt containing current policy
+        """
         X, obs = samples.get_X(), samples.get_obs()
-        all_X, all_obs = all_samples.get_X(), all_samples.get_obs()
-        U = all_samples.get_U()
-        dO, T = all_X.shape[2] + U.shape[2], all_X.shape[1]
-        if self._hyperparams['keep_samples']:
-            # Append data to dataset.
-            if self.X is None:
-                self.X = X
-            elif X.size > 0:
-                self.X = np.concatenate([self.X, X], axis=0)
-            if self.obs is None:
-                self.obs = obs
-            elif obs.size > 0:
-                self.obs = np.concatenate([self.obs, obs], axis=0)
-            # Remove excess samples from dataset.
-            start = max(0, self.X.shape[0] - self._max_samples + 1)
+
+        if self.X is None or mode == 'replace':
+            self.X = X
+            self.obs = obs
+        elif mode == 'add' and X.size > 0:
+            self.X = np.concatenate([self.X, X], axis=0)
+            self.obs = np.concatenate([self.obs, obs], axis=0)
+
+        # Trim extra samples
+        # TODO: how should this interact with replace_samples?
+        N = self.X.shape[0]
+        if N > self._max_samples:
+            start = N - self._max_samples
             self.X = self.X[start:, :, :]
             self.obs = self.obs[start:, :, :]
-            # Evaluate policy at samples to get mean policy action.
-            Upol = policy_opt.prob(self.obs.copy())[0]
-            # Create dataset.
-            N = self.X.shape[0]
-            XU = np.reshape(np.concatenate([self.X, Upol], axis=2), [T * N, dO])
-        else:
-            # Simply use the dataset that is already there.
-            all_U = policy_opt.prob(all_obs.copy())[0]
-            N = all_X.shape[0]
-            XU = np.reshape(np.concatenate([all_X, all_U], axis=2), [T * N, dO])
+
+        # Evaluate policy at samples to get mean policy action.
+        U = policy_opt.prob(self.obs.copy())[0]
+        # Create the dataset
+        N, T = self.X.shape[:2]
+        dO = self.X.shape[2] + U.shape[2]
+        XU = np.reshape(np.concatenate([self.X, U], axis=2), [T * N, dO])
         # Choose number of clusters.
         K = int(max(2, min(self._max_clusters,
                            np.floor(float(N * T) / self._min_samp))))
+
         LOGGER.debug('Generating %d clusters for policy prior GMM.', K)
-        # Update GMM.
-        if retrain:
-            self.gmm.update(XU, K)
+        self.gmm.update(XU, K)
 
     def eval(self, Ts, Ps):
         """ Evaluate prior. """

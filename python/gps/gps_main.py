@@ -12,6 +12,7 @@ import copy
 import argparse
 import threading
 import time
+import numpy as np
 
 # Add gps/python to path so that imports work.
 sys.path.append('/'.join(str.split(__file__, '/')[:-2]))
@@ -69,6 +70,7 @@ class GPSMain(object):
                 self.agent.get_samples(cond, -self._hyperparams['num_samples'])
                 for cond in self._train_idx
             ]
+
             self._take_iteration(itr, traj_sample_lists)
             pol_sample_lists = self._take_policy_samples()
             self._log_data(itr, traj_sample_lists, pol_sample_lists)
@@ -219,7 +221,7 @@ class GPSMain(object):
             N = self._hyperparams['verbose_policy_trials']
         if self.gui:
             self.gui.set_status_text('Taking policy samples.')
-        pol_samples = [[None for _ in range(N)] for _ in range(self._conditions)]
+        pol_samples = [[None for _ in range(N)] for _ in range(len(self._test_idx))]
         for cond in range(len(self._test_idx)):
             for i in range(N):
                 pol_samples[cond][i] = self.agent.sample(
@@ -285,6 +287,7 @@ def main():
                         help='silent debug print outs')
     parser.add_argument('-q', '--quit', action='store_true',
                         help='quit GUI automatically when finished')
+
     args = parser.parse_args()
 
     exp_name = args.experiment
@@ -301,6 +304,11 @@ def main():
         logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
     else:
         logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+
+    debug_txt = exp_dir + 'debug.txt'
+    fh = logging.FileHandler(debug_txt, 'w')
+    fh.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(fh)
 
     if args.new:
         from shutil import copy

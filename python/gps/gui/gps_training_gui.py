@@ -31,6 +31,10 @@ from gps.gui.util import buffered_axis_limits, load_data_from_npz
 
 from gps.proto.gps_pb2 import END_EFFECTOR_POINTS
 
+# Needed for typechecks
+from gps.algorithm.algorithm_badmm import AlgorithmBADMM
+from gps.algorithm.algorithm_mdgps import AlgorithmMDGPS
+
 class GPSTrainingGUI(object):
 
     def __init__(self, hyperparams):
@@ -265,8 +269,7 @@ class GPSTrainingGUI(object):
         and the 3D trajectory visualizations (if end effector points exist).
         """
         if self._first_update:
-            policy_titles = pol_sample_lists != None
-            self._output_column_titles(algorithm, policy_titles)
+            self._output_column_titles(algorithm)
             self._first_update = False
 
         costs = [np.mean(np.sum(algorithm.prev[m].cs, axis=1)) for m in range(algorithm.M)]
@@ -286,7 +289,7 @@ class GPSTrainingGUI(object):
         controller entropies, and initial/final KL divergences for BADMM.
         """
         self.set_output_text(self._hyperparams['experiment_name'])
-        if policy_titles:
+        if isinstance(algorithm, AlgorithmMDGPS) or isinstance(algorithm, AlgorithmBADMM):
             condition_titles = '%3s | %8s %12s' % ('', '', '')
             itr_data_fields  = '%3s | %8s %12s' % ('itr', 'avg_cost', 'avg_pol_cost')
         else:
@@ -295,9 +298,12 @@ class GPSTrainingGUI(object):
         for m in range(algorithm.M):
             condition_titles += ' | %8s %9s %-7d' % ('', 'condition', m)
             itr_data_fields  += ' | %8s %8s %8s' % ('  cost  ', '  step  ', 'entropy ')
-            if policy_titles:
+            if isinstance(algorithm, AlgorithmBADMM):
                 condition_titles += ' %8s %8s %8s' % ('', '', '')
                 itr_data_fields  += ' %8s %8s %8s' % ('pol_cost', 'kl_div_i', 'kl_div_f')
+            elif isinstance(algorithm, AlgorithmMDGPS):
+                condition_titles += ' %8s' % ('')
+                itr_data_fields  += ' %8s' % ('pol_cost')
         self.append_output_text(condition_titles)
         self.append_output_text(itr_data_fields)
 
@@ -321,10 +327,12 @@ class GPSTrainingGUI(object):
             entropy = 2*np.sum(np.log(np.diagonal(algorithm.prev[m].traj_distr.chol_pol_covar,
                     axis1=1, axis2=2)))
             itr_data += ' | %8.2f %8.2f %8.2f' % (cost, step, entropy)
-            if pol_sample_lists is not None:
+            if isinstance(algorithm, AlgorithmBADMM):
                 kl_div_i = algorithm.cur[m].pol_info.init_kl.mean()
                 kl_div_f = algorithm.cur[m].pol_info.prev_kl.mean()
                 itr_data += ' %8.2f %8.2f %8.2f' % (pol_costs[m], kl_div_i, kl_div_f)
+            elif isinstance(algorithm, AlgorithmMDGPS):
+                itr_data += ' %8.2f' % (pol_costs[m])
         self.append_output_text(itr_data)
 
     def _update_trajectory_visualizations(self, algorithm, agent,

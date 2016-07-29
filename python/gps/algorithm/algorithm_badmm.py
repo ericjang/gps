@@ -115,10 +115,12 @@ class AlgorithmBADMM(Algorithm):
             samples = self.cur[m].sample_list
             X = samples.get_X()
             N = len(samples)
+            # TODO: Can we get rid of if statement to unify with MDGPS?
+            # TODO: Might not work because of pol_wt actually
             if inner_itr > 0:
-              traj, pol_info = self.new_traj_distr[m], self.cur[m].pol_info
+                traj, pol_info = self.new_traj_distr[m], self.cur[m].pol_info
             else:
-              traj, pol_info = self.cur[m].traj_distr, self.cur[m].pol_info
+                traj, pol_info = self.cur[m].traj_distr, self.cur[m].pol_info
             mu = np.zeros((N, T, dU))
             prc = np.zeros((N, T, dU, dU))
             wt = np.zeros((N, T))
@@ -131,7 +133,7 @@ class AlgorithmBADMM(Algorithm):
                     mu[i, t, :] = \
                             (traj.K[t, :, :].dot(X[i, t, :]) + traj.k[t, :]) - \
                             np.linalg.solve(
-                                prc[i, t, :, :] / pol_info.pol_wt[t],  #TODO: Divide by pol_wt[t].
+                                prc[i, t, :, :] / pol_info.pol_wt[t],
                                 pol_info.lambda_K[t, :, :].dot(X[i, t, :]) + \
                                         pol_info.lambda_k[t, :]
                             )

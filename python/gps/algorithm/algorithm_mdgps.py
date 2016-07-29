@@ -48,36 +48,23 @@ class AlgorithmMDGPS(Algorithm):
         # Update dynamics model using all samples.
         self._update_dynamics()
 
-        # On the first iteration we need to make sure that the policy somewhat
-        # matches the init controller. Otherwise the LQR backpass starts with
-        # a bad linearization, and things don't work out well.
+        # On the first iteration, need to catch policy up to init_traj_distr.
         if self.iteration_count == 0:
             self.new_traj_distr = [
                 self.cur[cond].traj_distr for cond in range(self.M)
             ]
             self._update_policy()
 
-        # Step adjustment
-        self._update_step_size()  # KL Divergence step size (also fits policy).
-        for m in range(self.M):
-            pol_info = self.cur[m].pol_info
-            # Explicitly store the current pol_info, need for step size calc
-            self.cur[m].init_pol_info = copy.deepcopy(pol_info)
+        # Step adjustment (also updates policy fit)
+        self._update_step_size()
 
         # C-step
         self._update_trajectories()
-        for m in range(self.M):
-            # Save initial kl for debugging / visualization.
-            self.cur[m].pol_info.init_kl = self._policy_kl(m)[0]
 
         # S-step
         self._update_policy()
-        for m in range(self.M):
-            self._update_policy_fit(m)  # Update policy priors.
-            # Save final kl for debugging / visualization.
-            kl_m = self._policy_kl(m)[0]
-            self.cur[m].pol_info.prev_kl = kl_m
 
+        # Prepare for next iteration
         self._advance_iteration_variables()
 
     def _update_step_size(self):
@@ -85,6 +72,7 @@ class AlgorithmMDGPS(Algorithm):
         # Evaluate cost function for all conditions and samples.
         for m in range(self.M):
             self._update_policy_fit(m, init=True)
+            # TODO: this doesn't make sense with clusters
             self._eval_cost(m)
             # Adjust step size relative to the previous iteration.
             if self.iteration_count > 0:
@@ -188,9 +176,7 @@ class AlgorithmMDGPS(Algorithm):
             m: Condition
         """
         # Get the necessary linearizations
-        # TODO: right now the moving parts are complicated, and we need to
-        # use this hacky 'init_size_pol_info'. Need to refactor.
-        prev_nn = self.prev[m].init_pol_info.traj_distr()
+        prev_nn = self.prev[m].pol_info.traj_distr()
         cur_nn = self.cur[m].pol_info.traj_distr()
         cur_traj_distr = self.cur[m].traj_distr
 
@@ -247,47 +233,6 @@ class AlgorithmMDGPS(Algorithm):
                      predicted_impr, actual_impr)
 
         self._set_new_mult(predicted_impr, actual_impr, m)
-
-    def _policy_kl(self, m, prev=False):
-        """
-        Monte-Carlo estimate of KL divergence between policy and
-        trajectory.
-        """
-        dU, T = self.dU, self.T
-        if prev:
-            traj, pol_info = self.prev[m].traj_distr, self.cur[m].pol_info
-            samples = self.prev[m].sample_list
-        else:
-            traj, pol_info = self.new_traj_distr[m], self.cur[m].pol_info
-            samples = self.cur[m].sample_list
-        N = len(samples)
-        X, obs = samples.get_X(), samples.get_obs()
-        kl, kl_m = np.zeros((N, T)), np.zeros(T)
-        # Compute policy mean and covariance at each sample.
-        pol_mu, _, pol_prec, pol_det_sigma = self.policy_opt.prob(obs.copy())
-        # Compute KL divergence.
-        for t in range(T):
-            # Compute trajectory action at sample.
-            traj_mu = np.zeros((N, dU))
-            for i in range(N):
-                traj_mu[i, :] = traj.K[t, :, :].dot(X[i, t, :]) + traj.k[t, :]
-            diff = pol_mu[:, t, :] - traj_mu
-            tr_pp_ct = pol_prec[:, t, :, :] * traj.pol_covar[t, :, :]
-            k_ln_det_ct = 0.5 * dU + np.sum(
-                np.log(np.diag(traj.chol_pol_covar[t, :, :]))
-            )
-            ln_det_cp = np.log(pol_det_sigma[:, t])
-            # IMPORTANT: Note that this assumes that pol_prec does not
-            #            depend on state!!!!
-            #            (Only the last term makes this assumption.)
-            d_pp_d = np.sum(diff * (diff.dot(pol_prec[1, t, :, :])), axis=1)
-            kl[:, t] = 0.5 * np.sum(np.sum(tr_pp_ct, axis=1), axis=1) - \
-                    k_ln_det_ct + 0.5 * ln_det_cp + 0.5 * d_pp_d
-            tr_pp_ct_m = np.mean(tr_pp_ct, axis=0)
-            kl_m[t] = 0.5 * np.sum(np.sum(tr_pp_ct_m, axis=0), axis=0) - \
-                    k_ln_det_ct + 0.5 * np.mean(ln_det_cp) + \
-                    0.5 * np.mean(d_pp_d)
-        return kl_m, kl
 
     def compute_costs(self, m, eta):
         """ Compute cost estimates used in the LQR backward pass. """
